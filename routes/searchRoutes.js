@@ -12,7 +12,7 @@ router.get('/search', async (req, res) => {
   if (!keyword) return res.status(400).json({ message: 'Keyword is required' });
 
   try {
-    // const expandedQuery = await expandKeyword(keyword);
+    // Expand keyword manually or via AI
     const expandedQuery = `"${keyword}" OR "${keyword} news" OR "${keyword} trends"`;
     console.log('🔍 Expanded Query:', expandedQuery);
 
@@ -27,11 +27,25 @@ router.get('/search', async (req, res) => {
       },
     });
 
-    res.json(twitterRes.data);
+    const tweets = twitterRes.data.data || [];
+
+    // ✅ Sort by average of likes and retweets
+    const sortedTweets = tweets.sort((a, b) => {
+      const aMetrics = a.public_metrics || {};
+      const bMetrics = b.public_metrics || {};
+
+      const aAvg = (aMetrics.like_count + aMetrics.retweet_count) / 2;
+      const bAvg = (bMetrics.like_count + bMetrics.retweet_count) / 2;
+
+      return bAvg - aAvg; // Descending
+    });
+
+    res.json({ data: sortedTweets });
   } catch (err) {
     console.error('Twitter AI Search Error:', err.message);
     res.status(500).json({ message: 'AI-powered Twitter search failed' });
   }
 });
+
 
 module.exports = router;

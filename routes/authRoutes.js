@@ -27,6 +27,7 @@ router.post('/register', async (req, res) => {
       user: newUser.rows[0],
     });
   } catch (err) {
+    console.log("register error")
     res.status(500).json({ error: err.message });
   }
 });
