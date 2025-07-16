@@ -107,42 +107,53 @@ router.post('/google-login', async (req, res) => {
   }
 });
 
-// router.get('/search', async (req, res) => {
-//   const keyword = req.query.keyword;
-//   if (!keyword) return res.status(400).json({ message: 'Keyword is required' });
+// router.get('/api/search', async (req, res) => {
+//   const { keyword } = req.query;
+//   const expandedQueries = [
+//     `${keyword}`,
+//     `${keyword} news`,
+//     `${keyword} trends`
+//   ];
+
+//   const results = [];
 
 //   try {
-//     // ❌ Disable OpenAI to avoid 429 error
-//     // const expandedQuery = await expandKeyword(keyword);
+//     for (const query of expandedQueries) {
+//       const response = await axios.get(
+//         `https://api.twitter.com/2/tweets/search/recent`,
+//         {
+//           headers: { Authorization: `Bearer ${process.env.TWITTER_BEARER_TOKEN}` },
+//           params: {
+//             query: query,
+//             max_results: 10,
+//             'tweet.fields': 'public_metrics',
+//           }
+//         }
+//       );
 
-//     // ✅ Hardcoded fallback (temporary)
-//     const expandedQuery = `"${keyword}" OR "${keyword} news" OR "${keyword} insights"`;
-//     console.log('🔍 Using fallback query:', expandedQuery);
+//       results.push(...response.data.data);
 
-//     const twitterRes = await axios.get('https://api.twitter.com/2/tweets/search/recent', {
-//       headers: {
-//         Authorization: `Bearer ${process.env.TWITTER_BEARER_TOKEN}`,
-//       },
-//       params: {
-//         query: expandedQuery,
-//         max_results: 10,
-//         'tweet.fields': 'public_metrics,created_at',
-//       },
-//     });
+//       // ✅ Add delay here to prevent 429 rate limiting
+//       await new Promise((resolve) => setTimeout(resolve, 1000)); // wait 1 second
+//     }
 
-//     res.json(twitterRes.data);
-//   } catch (err) {
-//     console.error('❌ Twitter API Error:', err.response?.data || err.message);
-//     res.status(500).json({ message: 'Twitter search failed' });
+//     res.json({ data: results });
+//   } catch (error) {
+//     console.error("Twitter API Error:", error.response?.data || error.message);
+//     res.status(500).json({ error: "Search failed", detail: error.message });
 //   }
 // });
-// backend/routes/search.js or similar
 router.get('/api/search', async (req, res) => {
   const { keyword } = req.query;
+
+  if (!keyword) {
+    return res.status(400).json({ error: 'Keyword is required' });
+  }
+
   const expandedQueries = [
     `${keyword}`,
     `${keyword} news`,
-    `${keyword} trends`
+    `${keyword} trends`,
   ];
 
   const results = [];
@@ -150,27 +161,31 @@ router.get('/api/search', async (req, res) => {
   try {
     for (const query of expandedQueries) {
       const response = await axios.get(
-        `https://api.twitter.com/2/tweets/search/recent`,
+        'https://api.twitter.com/2/tweets/search/recent',
         {
-          headers: { Authorization: `Bearer ${process.env.TWITTER_BEARER_TOKEN}` },
+          headers: {
+            Authorization: `Bearer ${BEARER_TOKEN}`,
+          },
           params: {
-            query: query,
+            query,
             max_results: 10,
-            'tweet.fields': 'public_metrics',
-          }
+            'tweet.fields': 'public_metrics,author_id,created_at',
+          },
         }
       );
 
-      results.push(...response.data.data);
+      if (response.data.data) {
+        results.push(...response.data.data);
+      }
 
-      // ✅ Add delay here to prevent 429 rate limiting
-      await new Promise((resolve) => setTimeout(resolve, 1000)); // wait 1 second
+      // Prevent hitting rate limit
+      await new Promise((resolve) => setTimeout(resolve, 1000));
     }
 
-    res.json({ data: results });
+    res.json({ keyword, tweets: results });
   } catch (error) {
-    console.error("Twitter API Error:", error.response?.data || error.message);
-    res.status(500).json({ error: "Search failed", detail: error.message });
+    console.error('Twitter API error:', error.response?.data || error.message);
+    res.status(500).json({ error: 'Search failed', detail: error.message });
   }
 });
 
