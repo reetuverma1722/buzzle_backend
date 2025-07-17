@@ -24,18 +24,12 @@ var authRoutes = require('./routes/authRoutes');
 
 var searchRoutes = require('./routes/searchRoutes');
 
-var replyRoutes = require('./routes/genrateReply');
-
-var scrapeRoutes = require('./routes/scrapeRoutes');
-
 dotenv.config();
 var app = express();
 app.use(cors());
 app.use(express.json());
-app.use('/api/scrape', scrapeRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api', searchRoutes);
-app.use('/api/reply', replyRoutes);
 var PORT = process.env.PORT || 5000;
 app.listen(PORT, function () {
   console.log("\uD83D\uDE80 Server running on port ".concat(PORT));
