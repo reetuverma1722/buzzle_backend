@@ -5,9 +5,9 @@ const cors = require("cors");
 let fetch;
 (async () => {
   fetch = (await import("node-fetch")).default;
-  // ... rest of your logic here ...
+ 
 })();
-// ✅ npm install node-fetch if needed
+
 const { exec } = require("child_process");
 const fs = require("fs");
 const path = require("path");
