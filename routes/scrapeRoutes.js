@@ -68,7 +68,7 @@ router.get('/search', async (req, res) => {
         return {
           text,
           reply,
-          public_metrics: {
+          public_metrics: { 
             like_count: Math.floor(Math.random() * 1000),
             retweet_count: Math.floor(Math.random() * 500),
           },
