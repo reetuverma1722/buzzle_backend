@@ -55,34 +55,10 @@
 const express = require('express');
 const puppeteer = require('puppeteer');
 const cors = require('cors');
-const axios = require('axios');
 
 const app = express();
 app.use(cors());
-async function generateReply(tweetContent) {
-  const response = await axios.post(
-    'https://openrouter.ai/api/v1/chat/completions',
-    {
-      model: 'mistralai/mixtral-8x7b-instruct', // or other free model
-      messages: [
-        {
-          role: 'user',
-          content: `Reply smartly to this tweet:\n"${tweetContent}"\nMake it personal, friendly, and relevant.`,
-        },
-      ],
-    },
-    {
-      headers: {
-        'Authorization': `Bearer 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`,
-        'Content-Type': 'application/json',
-      },
-    }
-  );
 
-  const reply = response.data.choices[0]?.message?.content;
-  console.log("Reply:", reply);
-  return reply;
-}
 app.get('/api/search', async (req, res) => {
   const keyword = req.query.keyword;
   if (!keyword) {
@@ -92,7 +68,7 @@ app.get('/api/search', async (req, res) => {
   let browser;
   try {
     browser = await puppeteer.connect({
-      browserWSEndpoint: 'ws://localhost:9222/devtools/browser/a59052c0-b0f5-45fc-894d-355ae8293a2d',
+      browserWSEndpoint: 'ws://localhost:9222/devtools/browser/74dd3b6a-e9ec-428b-9e23-d3115d2f9a67',
     });
 
     const page = await browser.newPage();
@@ -100,7 +76,7 @@ app.get('/api/search', async (req, res) => {
 
     await page.goto(`https://twitter.com/search?q=${searchQuery}&src=typed_query`, {
       waitUntil: 'domcontentloaded',
-    }); 
+    });
 
     await page.waitForSelector('article', { timeout: 15000 });
 
@@ -110,25 +86,31 @@ app.get('/api/search', async (req, res) => {
       await new Promise((res) => setTimeout(res, 1500));
     }
 
-   const rawTweets = await page.evaluate(() => {
-  const tweetElements = document.querySelectorAll('article div[lang]');
-  return Array.from(tweetElements).map((el) => el.innerText);
-});
+   const tweets = await page.evaluate(() => {
+  const articles = document.querySelectorAll('article');
 
-// ✅ Now generate replies in Node.js
-const tweets = await Promise.all(
-  rawTweets.map(async (text) => {
-    const reply = await generateReply(text);
+  return Array.from(articles).map(article => {
+    const textElement = article.querySelector('div[lang]');
+    const anchor = article.querySelector('a[href*="/status/"]');
+    const text = textElement?.innerText || '';
+    const url = anchor?.href || '';
+
+    // Extract Tweet ID from URL
+    const match = url.match(/status\/(\d+)/);
+    const tweet_id = match ? match[1] : null;
+
     return {
+      id: tweet_id,
+      url,
       text,
-      reply,
       public_metrics: {
         like_count: Math.floor(Math.random() * 1000),
         retweet_count: Math.floor(Math.random() * 500),
-      },
+      }
     };
-  })
-);
+  }).filter(tweet => tweet.id); // Remove entries without ID
+});
+
 
     // 🔢 Sort by likes + retweets (descending) and return top 15
     const topTweets = tweets
