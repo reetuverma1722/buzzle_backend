@@ -163,6 +163,9 @@ router.get("/search", async (req, res) => {
   }
 });
 
+
+
+
 // router.get("/search", async (req, res) => {
 //   const keyword = req.query.keyword;
 //   if (!keyword) return res.status(400).json({ error: "Keyword is required" });
@@ -269,6 +272,31 @@ router.delete("/search/delete/:id", async (req, res) => {
   } catch (err) {
     console.error("Delete error:", err.message);
     res.status(500).json({ error: "Delete failed" });
+  }
+});
+// POST /api/post-reply
+router.post("/post-reply", async (req, res) => {
+  const { tweetId, replyText, accessToken } = req.body;
+
+  try {
+    const response = await axios.post(
+      "https://api.twitter.com/2/tweets",
+      {
+        text: replyText,
+        reply: { in_reply_to_tweet_id: tweetId },
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+
+    res.status(200).json({ message: "Reply posted!", data: response.data });
+  } catch (err) {
+    console.error("Tweet post error", err?.response?.data || err);
+    res.status(500).json({ error: "Failed to post tweet" });
   }
 });
 
