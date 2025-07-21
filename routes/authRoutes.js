@@ -194,8 +194,6 @@ const {
   TWITTER_CALLBACK_URL,
 } = process.env;
 
-let access_token = ""; 
-
 router.get("/twitter/callback", async (req, res) => {
   const { code } = req.query;
 
@@ -205,7 +203,7 @@ router.get("/twitter/callback", async (req, res) => {
       grant_type: "authorization_code",
       client_id: TWITTER_CLIENT_ID,
       redirect_uri: TWITTER_CALLBACK_URL,
-      code_verifier: "challenge", 
+      code_verifier: "challenge", // should match code_challenge from frontend
     });
 
     const tokenRes = await axios.post(
@@ -221,15 +219,82 @@ router.get("/twitter/callback", async (req, res) => {
       }
     );
 
-    access_token = tokenRes.data.access_token;
-    console.log("✅ Access token received:", access_token);
+    const access_token = tokenRes.data.access_token;
+    const refresh_token = tokenRes.data.refresh_token;
 
-    res.redirect(`http://localhost:3000/dashboard?accessToken=${access_token}`);
+    // redirect with token to frontend
+    res.redirect(`http://localhost:3000/dashboard?accessToken=${access_token}&refreshToken=${refresh_token}`);
   } catch (err) {
     console.error("❌ Token exchange failed:", err.response?.data || err.message);
     res.status(500).send("Twitter login failed");
   }
 });
+
+// POST tweet
+router.post("/tweet", async (req, res) => {
+  const { tweetText, accessToken } = req.body;
+
+  try {
+    const tweetRes = await axios.post(
+      "https://api.twitter.com/2/tweets",
+      { text: tweetText },
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+
+    res.json(tweetRes.data);
+  } catch (error) {
+    console.error("❌ Tweet post error:", error.response?.data || error.message);
+    res.status(500).json({ error: error.response?.data || "Tweet failed" });
+  }
+});
+
+// const {
+//   TWITTER_CLIENT_ID,
+//   TWITTER_CLIENT_SECRET,
+//   TWITTER_CALLBACK_URL,
+// } = process.env;
+
+// let access_token = ""; 
+
+// router.get("/twitter/callback", async (req, res) => {
+//   const { code } = req.query;
+
+//   try {
+//     const params = new URLSearchParams({
+//       code,
+//       grant_type: "authorization_code",
+//       client_id: TWITTER_CLIENT_ID,
+//       redirect_uri: TWITTER_CALLBACK_URL,
+//       code_verifier: "challenge", 
+//     });
+
+//     const tokenRes = await axios.post(
+//       "https://api.twitter.com/2/oauth2/token",
+//       params,
+//       {
+//         headers: {
+//           "Content-Type": "application/x-www-form-urlencoded",
+//           Authorization:
+//             "Basic " +
+//             Buffer.from(`${TWITTER_CLIENT_ID}:${TWITTER_CLIENT_SECRET}`).toString("base64"),
+//         },
+//       }
+//     );
+
+//     access_token = tokenRes.data.access_token;
+//     console.log("✅ Access token received:", access_token);
+
+//     res.redirect(`http://localhost:3000/dashboard?accessToken=${access_token}`);
+//   } catch (err) {
+//     console.error("❌ Token exchange failed:", err.response?.data || err.message);
+//     res.status(500).send("Twitter login failed");
+//   }
+// });
 
 
 module.exports = router;

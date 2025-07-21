@@ -218,14 +218,19 @@ router.delete("/search/delete/:id", async (req, res) => {
   }
 });
 // POST /api/post-reply
-router.post("/post-reply", async (req, res) => {
-  const { tweetId, replyText, accessToken } = req.body;
-
-  try {
-    const response = await axios.post(
-      "https://api.twitter.com/2/tweets",
+router.post("/postReply", async (req, res) => {
+ const { tweetId, reply } = req.body;
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !tweetId || !reply) {
+    return res.status(400).json({ message: 'Missing token, tweetId or reply' });
+  }
+ const accessToken = authHeader.replace("Bearer ", "");
+    try {
+    // Call Twitter API here to post the reply
+    const twitterResponse = await axios.post(
+      `https://api.twitter.com/2/tweets`,
       {
-        text: replyText,
+        text: reply,
         reply: { in_reply_to_tweet_id: tweetId },
       },
       {
@@ -235,8 +240,8 @@ router.post("/post-reply", async (req, res) => {
         },
       }
     );
-
-    res.status(200).json({ message: "Reply posted!", data: response.data });
+ res.json({ message: "Reply posted successfully", data: twitterResponse.data });
+    // res.status(200).json({ message: "Reply posted!", data: response.data });
   } catch (err) {
     console.error("Tweet post error", err?.response?.data || err);
     res.status(500).json({ error: "Failed to post tweet" });
