@@ -1,12 +1,12 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken'); // ✅ NEW
+const jwt = require('jsonwebtoken'); 
 const pool = require('../db');
 const router = express.Router();
-require('dotenv').config(); // ✅ make sure this is here
+require('dotenv').config(); 
 const BEARER_TOKEN = process.env.TWITTER_BEARER_TOKEN;
 const { expandKeyword } = require('../aiSearch');
-
+const axios = require('axios');
 router.post('/register', async (req, res) => {
   const { email, password } = req.body;
 
@@ -143,49 +143,91 @@ router.post('/google-login', async (req, res) => {
 //     res.status(500).json({ error: "Search failed", detail: error.message });
 //   }
 // });
-router.get('/api/search', async (req, res) => {
-  const { keyword } = req.query;
+// router.get('/api/search', async (req, res) => {
+//   const { keyword } = req.query;
 
-  if (!keyword) {
-    return res.status(400).json({ error: 'Keyword is required' });
-  }
+//   if (!keyword) {
+//     return res.status(400).json({ error: 'Keyword is required' });
+//   }
 
-  const expandedQueries = [
-    `${keyword}`,
-    `${keyword} news`,
-    `${keyword} trends`,
-  ];
+//   const expandedQueries = [
+//     `${keyword}`,
+//     `${keyword} news`,
+//     `${keyword} trends`,
+//   ];
 
-  const results = [];
+//   const results = [];
+
+//   try {
+//     for (const query of expandedQueries) {
+//       const response = await axios.get(
+//         'https://api.twitter.com/2/tweets/search/recent',
+//         {
+//           headers: {
+//             Authorization: `Bearer ${BEARER_TOKEN}`,
+//           },
+//           params: {
+//             query,
+//             max_results: 10,
+//             'tweet.fields': 'public_metrics,author_id,created_at',
+//           },
+//         }
+//       );
+
+//       if (response.data.data) {
+//         results.push(...response.data.data);
+//       }
+
+//       // Prevent hitting rate limit
+//       await new Promise((resolve) => setTimeout(resolve, 1000));
+//     }
+
+//     res.json({ keyword, tweets: results });
+//   } catch (error) {
+//     console.error('Twitter API error:', error.response?.data || error.message);
+//     res.status(500).json({ error: 'Search failed', detail: error.message });
+//   }
+// });
+const {
+  TWITTER_CLIENT_ID,
+  TWITTER_CLIENT_SECRET,
+  TWITTER_CALLBACK_URL,
+} = process.env;
+
+let access_token = ""; 
+
+router.get("/twitter/callback", async (req, res) => {
+  const { code } = req.query;
 
   try {
-    for (const query of expandedQueries) {
-      const response = await axios.get(
-        'https://api.twitter.com/2/tweets/search/recent',
-        {
-          headers: {
-            Authorization: `Bearer ${BEARER_TOKEN}`,
-          },
-          params: {
-            query,
-            max_results: 10,
-            'tweet.fields': 'public_metrics,author_id,created_at',
-          },
-        }
-      );
+    const params = new URLSearchParams({
+      code,
+      grant_type: "authorization_code",
+      client_id: TWITTER_CLIENT_ID,
+      redirect_uri: TWITTER_CALLBACK_URL,
+      code_verifier: "challenge", 
+    });
 
-      if (response.data.data) {
-        results.push(...response.data.data);
+    const tokenRes = await axios.post(
+      "https://api.twitter.com/2/oauth2/token",
+      params,
+      {
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          Authorization:
+            "Basic " +
+            Buffer.from(`${TWITTER_CLIENT_ID}:${TWITTER_CLIENT_SECRET}`).toString("base64"),
+        },
       }
+    );
 
-      // Prevent hitting rate limit
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-    }
+    access_token = tokenRes.data.access_token;
+    console.log("✅ Access token received:", access_token);
 
-    res.json({ keyword, tweets: results });
-  } catch (error) {
-    console.error('Twitter API error:', error.response?.data || error.message);
-    res.status(500).json({ error: 'Search failed', detail: error.message });
+    res.redirect(`http://localhost:3000/dashboard?accessToken=${access_token}`);
+  } catch (err) {
+    console.error("❌ Token exchange failed:", err.response?.data || err.message);
+    res.status(500).send("Twitter login failed");
   }
 });
 

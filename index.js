@@ -1,19 +1,4 @@
-// const express = require('express');
-// const bodyParser = require('body-parser');
-// const login = require('./login');
 
-// const app = express();
-// app.use(bodyParser.json());
-
-// app.post('/login', async (req, res) => {
-//   const { username, password } = req.body;
-//   const result = await login.login(username, password);
-//   res.json(result);
-// });
-
-// app.listen(3001, () => {
-//   console.log('Server is running on port 3001');
-// });
 
 // index.js
 const express = require('express');

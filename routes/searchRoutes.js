@@ -1,6 +1,5 @@
-
 const express = require("express");
-const db = require("../db"); 
+const db = require("../db");
 const axios = require("axios");
 const puppeteer = require("puppeteer-core");
 const { exec } = require("child_process");
@@ -35,7 +34,7 @@ async function generateReply(tweetContent) {
   );
 
   const reply = response.data.choices[0]?.message?.content;
-  console.log("Reply:", reply);
+  // console.log("Reply:", reply);
   return reply;
 }
 async function getWebSocketDebuggerUrl() {
@@ -67,95 +66,125 @@ async function launchChromeIfNeeded() {
 
   throw new Error("❌ Failed to launch Chrome or fetch debugger WebSocket URL");
 }
-
 router.get("/search", async (req, res) => {
-  const keyword = req.query.keyword;
-  if (!keyword) return res.status(400).json({ error: "Keyword is required" });
+  const rawKeyword = req.query.keyword;
+  const minLikes = parseInt(req.query.minLikes || "0");
+  const minRetweets = parseInt(req.query.minRetweets || "0");
+  const minFollowers = parseInt(req.query.minFollowers || "0");
 
-  await db.query(`INSERT INTO search_history (keyword) VALUES ($1)`, [keyword]);
+  if (!rawKeyword)
+    return res.status(400).json({ error: "Keyword is required" });
+
+  const keywords = rawKeyword
+    .split(",")
+    .map((k) => k.trim())
+    .filter((k) => k);
 
   try {
-    // 1. Check DB cache first
-    const existingTweets = await db.query(
-      `SELECT * FROM tweets WHERE keyword = $1 ORDER BY created_at DESC`,
-      [keyword]
-    );
+    let allTweets = [];
 
-    if (existingTweets.rows.length > 0) {
-      return res.json({
+    for (const keyword of keywords) {
+      // 1. Store in history
+      await db.query(`INSERT INTO search_history (keyword) VALUES ($1)`, [
         keyword,
-        from: "cache",
-        count: existingTweets.rows.length,
-        tweets: existingTweets.rows,
-      });
-    }
+      ]);
 
-    // 2. Continue with scraping if not in cache
-    const wsEndpoint = await launchChromeIfNeeded();
-    const browser = await puppeteer.connect({
-      browserWSEndpoint: wsEndpoint,
-      defaultViewport: null,
-    });
-
-    const page = await browser.newPage();
-    const searchQuery = encodeURIComponent(keyword);
-    await page.goto(
-      `https://twitter.com/search?q=${searchQuery}&src=typed_query`,
-      { waitUntil: "domcontentloaded" }
-    );
-
-    for (let i = 0; i < 10; i++) {
-      await page.evaluate(() => window.scrollBy(0, window.innerHeight));
-      await new Promise((res) => setTimeout(res, 1500));
-    }
-
-    const scrapedTweets = await page.evaluate(() => {
-      const articles = document.querySelectorAll("article");
-      return Array.from(articles)
-        .map((article) => {
-          const text = article.querySelector("div[lang]")?.innerText;
-          const idMatch = article
-            .querySelector('a[href*="/status/"]')
-            ?.getAttribute("href")
-            ?.match(/status\/(\d+)/);
-          const id = idMatch ? idMatch[1] : null;
-
-          if (!id || !text) return null;
-
-          return {
-            id,
-            text,
-            like_count: Math.floor(Math.random() * 1000),
-            retweet_count: Math.floor(Math.random() * 500),
-          };
-        })
-        .filter(Boolean);
-    });
-
-    for (const tweet of scrapedTweets) {
-      const reply = await generateReply(tweet.text);
-      tweet.reply = reply;
-
-      await db.query(
-        `INSERT INTO tweets (id, text, reply, like_count, retweet_count, keyword, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, NOW())
-         ON CONFLICT (id) DO NOTHING`,
-        [
-          tweet.id,
-          tweet.text,
-          reply,
-          tweet.like_count,
-          tweet.retweet_count,
-          keyword,
-        ]
+      // 2. Check DB cache first
+      const cached = await db.query(
+        `SELECT * FROM tweets WHERE keyword = $1 AND like_count >= $2 AND retweet_count >= $3 AND followers_count >= $4 ORDER BY created_at DESC`,
+        [keyword, minLikes, minRetweets, minFollowers]
       );
+
+      if (cached.rows.length > 0) {
+        allTweets.push(...cached.rows);
+        continue;
+      }
+
+      // 3. Scrape if not in cache
+      const wsEndpoint = await launchChromeIfNeeded();
+      const browser = await puppeteer.connect({
+        browserWSEndpoint: wsEndpoint,
+        defaultViewport: null,
+      });
+
+      const page = await browser.newPage();
+      const searchQuery = encodeURIComponent(keyword);
+      await page.goto(
+        `https://twitter.com/search?q=${searchQuery}&src=typed_query`,
+        { waitUntil: "domcontentloaded" }
+      );
+
+      for (let i = 0; i < 10; i++) {
+        await page.evaluate(() => window.scrollBy(0, window.innerHeight));
+        await new Promise((res) => setTimeout(res, 1500));
+      }
+
+      const scrapedTweets = await page.evaluate(() => {
+        const articles = document.querySelectorAll("article");
+        return Array.from(articles)
+          .map((article) => {
+            const text = article.querySelector("div[lang]")?.innerText;
+            const idMatch = article
+              .querySelector('a[href*="/status/"]')
+              ?.getAttribute("href")
+              ?.match(/status\/(\d+)/);
+            const id = idMatch ? idMatch[1] : null;
+
+            if (!id || !text) return null;
+
+            return {
+              id,
+              text,
+              like_count: Math.floor(Math.random() * 1000),
+              retweet_count: Math.floor(Math.random() * 500),
+              followers_count: Math.floor(Math.random() * 10000),
+            };
+          })
+          .filter(Boolean);
+      });
+
+      for (const tweet of scrapedTweets) {
+        const reply = await generateReply(tweet.text);
+        tweet.reply = reply;
+
+        await db.query(
+          `INSERT INTO tweets (id, text, reply, like_count, retweet_count,followers_count, keyword, created_at)
+           VALUES ($1, $2, $3, $4, $5, $6,$7, NOW())
+           ON CONFLICT (id) DO NOTHING`,
+          [
+            tweet.id,
+            tweet.text,
+            reply,
+            tweet.like_count,
+            tweet.retweet_count,
+            tweet.followers_count,
+            keyword,
+          ]
+        );
+      }
+
+      // Add scraped tweets to result if they match filter
+      let filtered = scrapedTweets;
+      const isFilteringApplied =
+        minLikes > 0 || minRetweets > 0 || minFollowers > 0;
+
+      if (isFilteringApplied) {
+        filtered = scrapedTweets.filter(
+          (tweet) =>
+            tweet.like_count >= minLikes &&
+            tweet.retweet_count >= minRetweets &&
+            tweet.followers_count >= minFollowers
+        );
+      }
+
+      allTweets.push(...filtered);
     }
 
     res.json({
-      keyword,
-      from: "scraped",
-      count: scrapedTweets.length,
-      tweets: scrapedTweets,
+      keywords,
+      from: "cache",
+      count: allTweets.length,
+      tweets: allTweets,
     });
   } catch (err) {
     console.error("❌ Scrape error:", err.message);
@@ -163,91 +192,6 @@ router.get("/search", async (req, res) => {
   }
 });
 
-
-
-
-// router.get("/search", async (req, res) => {
-//   const keyword = req.query.keyword;
-//   if (!keyword) return res.status(400).json({ error: "Keyword is required" });
-//   await db.query(`INSERT INTO search_history (keyword) VALUES ($1)`, [keyword]);
-
-//   let browser;
-//   try {
-//     const wsEndpoint = await launchChromeIfNeeded();
-
-//     browser = await puppeteer.connect({
-//       browserWSEndpoint: wsEndpoint,
-//       defaultViewport: null,
-//     });
-
-//     const page = await browser.newPage();
-//     const searchQuery = encodeURIComponent(keyword);
-
-//     await page.goto(
-//       `https://twitter.com/search?q=${searchQuery}&src=typed_query`,
-//       {
-//         waitUntil: "domcontentloaded",
-//       }
-//     );
-
-//     for (let i = 0; i < 10; i++) {
-//       await page.evaluate(() => window.scrollBy(0, window.innerHeight));
-//       await new Promise((res) => setTimeout(res, 1500));
-//     }
-
-//     const scrapedTweets = await page.evaluate(() => {
-//       const articles = document.querySelectorAll("article");
-//       return Array.from(articles)
-//         .map((article) => {
-//           const text = article.querySelector("div[lang]")?.innerText;
-//           const idMatch = article
-//             .querySelector('a[href*="/status/"]')
-//             ?.getAttribute("href")
-//             ?.match(/status\/(\d+)/);
-//           const id = idMatch ? idMatch[1] : null;
-
-//           if (!id || !text) return null;
-
-//           return {
-//             id,
-//             text,
-//             like_count: Math.floor(Math.random() * 1000),
-//             retweet_count: Math.floor(Math.random() * 500),
-//           };
-//         })
-//         .filter(Boolean);
-//     });
-
-//     // Generate replies and save
-//     for (const tweet of scrapedTweets) {
-//       const reply = await generateReply(tweet.text);
-//       tweet.reply = reply;
-
-//       await db.query(
-//         `INSERT INTO tweets (id, text, reply, like_count, retweet_count, keyword, created_at)
-//          VALUES ($1, $2, $3, $4, $5, $6, NOW())
-//       ON CONFLICT (id) DO NOTHING`,
-//         [
-//           tweet.id,
-//           tweet.text,
-//           reply,
-//           tweet.like_count,
-//           tweet.retweet_count,
-//           keyword,
-//         ]
-//       );
-//     }
-
-//     res.json({ keyword, count: scrapedTweets.length, tweets: scrapedTweets });
-//   } catch (err) {
-//     console.error("❌ Scrape error:", err.message);
-//     res.status(500).json({ error: "Scraping failed", message: err.message });
-//   } finally {
-//     if (browser) await browser.disconnect();
-//   }
-// });
-
-// routes/searchRoutes.js
 router.get("/search/history", async (req, res) => {
   try {
     const result = await db.query(`
@@ -262,7 +206,6 @@ router.get("/search/history", async (req, res) => {
     res.status(500).json({ error: "Failed to fetch tweet history" });
   }
 });
-
 
 router.delete("/search/delete/:id", async (req, res) => {
   const { id } = req.params;
