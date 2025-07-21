@@ -4,16 +4,10 @@ const crypto = require('crypto');
 const app = express();
 
 const PORT = 3000;
-
-// ======== CONFIGURATION ========
- const CLIENT_ID='RVp3MTJpY0ZCWWNwYzlMQzVLN1U6MTpjaQ';
-  const CLIENT_SECRET='Y_ox3nJz3uOayyFE-ZRmbF2HCYdkdUcFIBUA6Ef4pGwjjD1-f_';
 const REDIRECT_URI = 'http://localhost:3000/callback';
 const SCOPES = 'tweet.read tweet.write users.read offline.access';
-const TWEET_ID_TO_REPOST = '1947007150183657652';
-// ===============================
-
-// PKCE setup
+const CLIENT_ID='RVp3MTJpY0ZCWWNwYzlMQzVLN1U6MTpjaQ';
+  const CLIENT_SECRET='Y_ox3nJz3uOayyFE-ZRmbF2HCYdkdUcFIBUA6Ef4pGwjjD1-f_';
 const code_verifier = crypto.randomBytes(64).toString('hex');
 const code_challenge = crypto
   .createHash('sha256')
@@ -24,16 +18,22 @@ const code_challenge = crypto
   .replace(/=+$/, '');
 
 const STATE = crypto.randomBytes(16).toString('hex');
-
 app.get('/', (req, res) => {
-  const authUrl = `https://twitter.com/i/oauth2/authorize?response_type=code&client_id=${CLIENT_ID}&redirect_uri=${encodeURIComponent(
+  const twitterId = req.query.twitterId;
+
+  if (!twitterId) {
+    return res.status(400).send('Missing twitterId');
+  }
+
+  const authUrl = `https://twitter.com/i/oauth2/authorize?response_type=code&client_id=${twitterId}&redirect_uri=${encodeURIComponent(
     REDIRECT_URI
   )}&scope=${encodeURIComponent(SCOPES)}&state=${STATE}&code_challenge=${code_challenge}&code_challenge_method=S256`;
 
   console.log('\n🔗 Visit this link to authorize:');
   console.log(authUrl);
 
-  res.send(`<a href="${authUrl}">Login with Twitter</a>`);
+  // Store the twitterId in a cookie or session — for now we'll pass it back
+  res.redirect(authUrl); // or show login page with the link
 });
 
 app.get('/callback', async (req, res) => {
@@ -81,20 +81,8 @@ const tokenRes = await axios.post('https://api.twitter.com/2/oauth2/token', para
     const userId = userRes.data.data.id;
     console.log(`👤 Authenticated as user ID: ${userId}`);
 
-    // Retweet
-    const repostRes = await axios.post(
-      `https://api.twitter.com/2/users/${userId}/retweets`,
-      { tweet_id: TWEET_ID_TO_REPOST },
-      {
-        headers: {
-          Authorization: `Bearer ${access_token}`,
-          'Content-Type': 'application/json',
-        },
-      }
-    );
-
-    console.log('🔁 Retweet complete:', repostRes.data);
-    res.send(`✅ Retweet successful: ${JSON.stringify(repostRes.data)}`);
+    console.log("user Authenticated")
+    res.redirect("http://localhost:3001/dashboard");
   } catch (err) {
     console.error('❌ Error:', err.response?.data || err.message);
     res.status(500).send('❌ Error during OAuth or reposting');
