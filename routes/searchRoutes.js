@@ -1,51 +1,228 @@
+// const express = require('express');
+// const axios = require('axios');
+// const { expandKeyword, generateReply } = require('../aiSearch');
+// require('dotenv').config();
+
+// const router = express.Router();
+// const BEARER_TOKEN = process.env.TWITTER_BEARER_TOKEN;
+
+// router.get('/search', async (req, res) => {
+//   const { keyword } = req.query;
+//   if (!keyword) return res.status(400).json({ message: 'Keyword is required' });
+
+//   try {
+//     const expandedQuery = await expandKeyword(keyword);
+//     console.log('🔍 Expanded Query:', expandedQuery);
+
+//     const twitterRes = await axios.get('https://api.twitter.com/2/tweets/search/recent', {
+//       headers: {
+//         Authorization: `Bearer ${BEARER_TOKEN}`,
+//       },
+//       params: {
+//         query: expandedQuery,
+//         max_results: 3,
+//         'tweet.fields': 'public_metrics,created_at',
+//       },
+//     });
+
+//     const tweets = twitterRes.data.data;
+
+//     const enrichedTweets = await Promise.all(
+//       tweets.map(async (tweet) => {
+//         const comment = await generateReply(tweet.text);
+//         return {
+//           post: tweet.text,
+//           comments: comment,
+//           metrics: tweet.public_metrics,
+//         };
+//       })
+//     );
+
+//     res.json(enrichedTweets);
+//   } catch (err) {
+//     console.error('❌ Twitter AI Search Error:', err.message);
+//     res.status(500).json({ message: 'AI-powered Twitter search failed' });
+//   }
+// });
+
+// module.exports = router;
+
 // routes/searchRoutes.js
-const express = require('express');
-const axios = require('axios');
-const { expandKeyword } = require('../aiSearch');
-require('dotenv').config();
+const express = require("express");
+const db = require("../db"); // adjust path as needed
+const axios = require("axios");
+const puppeteer = require("puppeteer-core");
+const { exec } = require("child_process");
+let fetch;
+(async () => {
+  fetch = (await import("node-fetch")).default;
+})();
 
 const router = express.Router();
-const BEARER_TOKEN = process.env.TWITTER_BEARER_TOKEN;
 
-router.get('/search', async (req, res) => {
-  const keyword = req.query.keyword;
-  if (!keyword) return res.status(400).json({ message: 'Keyword is required' });
-
-  try {
-    // Expand keyword manually or via AI
-    const expandedQuery = `"${keyword}" OR "${keyword} news" OR "${keyword} trends"`;
-    console.log('🔍 Expanded Query:', expandedQuery);
-
-    const twitterRes = await axios.get('https://api.twitter.com/2/tweets/search/recent', {
+const CHROME_PATH = `"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"`;
+const USER_DATA_DIR = "C:\\chrome-profile";
+async function generateReply(tweetContent) {
+  const response = await axios.post(
+    "https://openrouter.ai/api/v1/chat/completions",
+    {
+      model: "mistralai/mixtral-8x7b-instruct", // or other free model
+      messages: [
+        {
+          role: "user",
+          content: `Reply smartly to this tweet:\n"${tweetContent}"\nMake it personal, friendly, and relevant.`,
+        },
+      ],
+    },
+    {
       headers: {
-        Authorization: `Bearer ${BEARER_TOKEN}`,
+        Authorization: `Bearer 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`,
+        "Content-Type": "application/json",
       },
-      params: {
-        query: expandedQuery,
-        max_results: 10,
-        'tweet.fields': 'public_metrics,created_at',
-      },
-    });
+    }
+  );
 
-    const tweets = twitterRes.data.data || [];
-
-    // ✅ Sort by average of likes and retweets
-    const sortedTweets = tweets.sort((a, b) => {
-      const aMetrics = a.public_metrics || {};
-      const bMetrics = b.public_metrics || {};
-
-      const aAvg = (aMetrics.like_count + aMetrics.retweet_count) / 2;
-      const bAvg = (bMetrics.like_count + bMetrics.retweet_count) / 2;
-
-      return bAvg - aAvg; // Descending
-    });
-
-    res.json({ data: sortedTweets });
+  const reply = response.data.choices[0]?.message?.content;
+  console.log("Reply:", reply);
+  return reply;
+}
+async function getWebSocketDebuggerUrl() {
+  try {
+    const response = await fetch("http://localhost:9222/json/version");
+    const json = await response.json();
+    return json.webSocketDebuggerUrl;
   } catch (err) {
-    console.error('Twitter AI Search Error:', err.message);
-    res.status(500).json({ message: 'AI-powered Twitter search failed' });
+    return null;
+  }
+}
+
+async function launchChromeIfNeeded() {
+  const debuggerUrl = await getWebSocketDebuggerUrl();
+  if (debuggerUrl) return debuggerUrl;
+
+  console.log("🟡 Launching Chrome with remote debugging...");
+  exec(
+    `${CHROME_PATH} --headless=new --disable-gpu --remote-debugging-port=9222 --user-data-dir="${USER_DATA_DIR}"`
+  );
+
+  let attempts = 0;
+  while (attempts < 10) {
+    const ws = await getWebSocketDebuggerUrl();
+    if (ws) return ws;
+    await new Promise((r) => setTimeout(r, 1000));
+    attempts++;
+  }
+
+  throw new Error("❌ Failed to launch Chrome or fetch debugger WebSocket URL");
+}
+
+router.get("/search", async (req, res) => {
+  const keyword = req.query.keyword;
+  if (!keyword) return res.status(400).json({ error: "Keyword is required" });
+  await db.query(`INSERT INTO search_history (keyword) VALUES ($1)`, [keyword]);
+
+  let browser;
+  try {
+    const wsEndpoint = await launchChromeIfNeeded();
+
+    browser = await puppeteer.connect({
+      browserWSEndpoint: wsEndpoint,
+      defaultViewport: null,
+    });
+
+    const page = await browser.newPage();
+    const searchQuery = encodeURIComponent(keyword);
+
+    await page.goto(
+      `https://twitter.com/search?q=${searchQuery}&src=typed_query`,
+      {
+        waitUntil: "domcontentloaded",
+      }
+    );
+
+    for (let i = 0; i < 10; i++) {
+      await page.evaluate(() => window.scrollBy(0, window.innerHeight));
+      await new Promise((res) => setTimeout(res, 1500));
+    }
+
+    const scrapedTweets = await page.evaluate(() => {
+      const articles = document.querySelectorAll("article");
+      return Array.from(articles)
+        .map((article) => {
+          const text = article.querySelector("div[lang]")?.innerText;
+          const idMatch = article
+            .querySelector('a[href*="/status/"]')
+            ?.getAttribute("href")
+            ?.match(/status\/(\d+)/);
+          const id = idMatch ? idMatch[1] : null;
+
+          if (!id || !text) return null;
+
+          return {
+            id,
+            text,
+            like_count: Math.floor(Math.random() * 1000),
+            retweet_count: Math.floor(Math.random() * 500),
+          };
+        })
+        .filter(Boolean);
+    });
+
+    // Generate replies and save
+    for (const tweet of scrapedTweets) {
+      const reply = await generateReply(tweet.text);
+      tweet.reply = reply;
+
+      await db.query(
+        `INSERT INTO tweets (id, text, reply, like_count, retweet_count, keyword, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, NOW())
+      ON CONFLICT (id) DO NOTHING`,
+        [
+          tweet.id,
+          tweet.text,
+          reply,
+          tweet.like_count,
+          tweet.retweet_count,
+          keyword,
+        ]
+      );
+    }
+
+    res.json({ keyword, count: scrapedTweets.length, tweets: scrapedTweets });
+  } catch (err) {
+    console.error("❌ Scrape error:", err.message);
+    res.status(500).json({ error: "Scraping failed", message: err.message });
+  } finally {
+    if (browser) await browser.disconnect();
   }
 });
 
+// routes/searchRoutes.js
+router.get("/search/history", async (req, res) => {
+  try {
+    const result = await db.query(`
+      SELECT id, text,reply, like_count, retweet_count, keyword, created_at
+      FROM tweets
+      ORDER BY created_at DESC
+    `);
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error("❌ Failed to fetch tweet history:", err.message);
+    res.status(500).json({ error: "Failed to fetch tweet history" });
+  }
+});
+
+// routes/searchRoutes.js
+router.delete("/search/delete/:id", async (req, res) => {
+  const { id } = req.params;
+  try {
+    await db.query(`DELETE FROM tweets WHERE id = $1`, [id]);
+    res.json({ success: true });
+  } catch (err) {
+    console.error("Delete error:", err.message);
+    res.status(500).json({ error: "Delete failed" });
+  }
+});
 
 module.exports = router;
