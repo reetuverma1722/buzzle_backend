@@ -82,7 +82,8 @@ const tokenRes = await axios.post('https://api.twitter.com/2/oauth2/token', para
     console.log(`👤 Authenticated as user ID: ${userId}`);
 
     console.log("user Authenticated")
-    res.redirect("http://localhost:3001/dashboard");
+  res.redirect(`http://localhost:3001/dashboard?access_token=${access_token}`);
+
   } catch (err) {
     console.error('❌ Error:', err.response?.data || err.message);
     res.status(500).send('❌ Error during OAuth or reposting');

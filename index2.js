@@ -1,103 +1,72 @@
 const express = require('express');
 const axios = require('axios');
-const crypto = require('crypto');
 const app = express();
 
 const PORT = 3000;
 
-// ======== CONFIGURATION ========
- const CLIENT_ID='RVp3MTJpY0ZCWWNwYzlMQzVLN1U6MTpjaQ';
-  const CLIENT_SECRET='Y_ox3nJz3uOayyFE-ZRmbF2HCYdkdUcFIBUA6Ef4pGwjjD1-f_';
-const REDIRECT_URI = 'http://localhost:3000/callback';
-const SCOPES = 'tweet.read tweet.write users.read offline.access';
-const TWEET_ID_TO_REPOST = '1947007150183657652';
-// ===============================
+app.get('/', async (req, res) => {
+  const accessToken = req.query.twitterId;
+  const tweetId = req.query.tweetId;
+  const reply = req.query.reply;
 
-// PKCE setup
-const code_verifier = crypto.randomBytes(64).toString('hex');
-const code_challenge = crypto
-  .createHash('sha256')
-  .update(code_verifier)
-  .digest('base64')
-  .replace(/\+/g, '-')
-  .replace(/\//g, '_')
-  .replace(/=+$/, '');
-
-const STATE = crypto.randomBytes(16).toString('hex');
-
-app.get('/', (req, res) => {
-  const authUrl = `https://twitter.com/i/oauth2/authorize?response_type=code&client_id=${CLIENT_ID}&redirect_uri=${encodeURIComponent(
-    REDIRECT_URI
-  )}&scope=${encodeURIComponent(SCOPES)}&state=${STATE}&code_challenge=${code_challenge}&code_challenge_method=S256`;
-
-  console.log('\n🔗 Visit this link to authorize:');
-  console.log(authUrl);
-
-  res.send(`<a href="${authUrl}">Login with Twitter</a>`);
-});
-
-app.get('/callback', async (req, res) => {
-  const { code, state } = req.query;
-
-  if (state !== STATE) {
-    return res.status(403).send('State mismatch');
+  if (!accessToken || !tweetId) {
+    return res.status(400).send('❌ Missing accessToken or tweetId');
   }
 
   try {
-    // Exchange code for access token
-    const params = new URLSearchParams();
-    params.append('code', code);
-    params.append('grant_type', 'authorization_code');
-    params.append('client_id', CLIENT_ID);
-    params.append('redirect_uri', REDIRECT_URI);
-    params.append('code_verifier', code_verifier);
-
-   
-
-    // const tokenRes = await axios.post('https://api.twitter.com/2/oauth2/token', params.toString(), {
-    //   headers: {
-    //     'Content-Type': 'application/x-www-form-urlencoded',
-    //   },
-    // });
-const credentials = Buffer.from(`${CLIENT_ID}:${CLIENT_SECRET}`).toString('base64');
-
-const tokenRes = await axios.post('https://api.twitter.com/2/oauth2/token', params.toString(), {
-  headers: {
-    'Content-Type': 'application/x-www-form-urlencoded',
-    Authorization: `Basic ${credentials}`,
-  },
-});
-
-    const { access_token } = tokenRes.data;
-    console.log('✅ Access token received');
-
-    // Get user ID
+    // ✅ Step 1: Get user ID
     const userRes = await axios.get('https://api.twitter.com/2/users/me', {
       headers: {
-        Authorization: `Bearer ${access_token}`,
+        Authorization: `Bearer ${accessToken}`,
       },
     });
 
-    const userId = userRes.data.data.id;
-    console.log(`👤 Authenticated as user ID: ${userId}`);
+    const userId = userRes.data?.data?.id;
+    if (!userId) return res.status(400).send("❌ Couldn't fetch user ID");
 
-    // Retweet
-    const repostRes = await axios.post(
+    console.log(`👤 User ID: ${userId}`);
+    console.log(`🔁 Retweeting tweet: ${tweetId}`);
+
+    // ✅ Step 2: Retweet
+    const retweetRes = await axios.post(
       `https://api.twitter.com/2/users/${userId}/retweets`,
-      { tweet_id: TWEET_ID_TO_REPOST },
+      { tweet_id: tweetId },
       {
         headers: {
-          Authorization: `Bearer ${access_token}`,
+          Authorization: `Bearer ${accessToken}`,
           'Content-Type': 'application/json',
         },
       }
     );
 
-    console.log('🔁 Retweet complete:', repostRes.data);
-    res.send(`✅ Retweet successful: ${JSON.stringify(repostRes.data)}`);
+    // ✅ Step 3: Optional reply
+    let replyRes = null;
+    if (reply && reply.trim()) {
+      replyRes = await axios.post(
+        `https://api.twitter.com/2/tweets`,
+        {
+          text: reply,
+          reply: {
+            in_reply_to_tweet_id: tweetId,
+          },
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+          },
+        }
+      );
+    }
+
+    res.send({
+      message: '✅ Retweet and reply successful',
+      retweetData: retweetRes.data,
+      replyData: replyRes?.data || null,
+    });
   } catch (err) {
     console.error('❌ Error:', err.response?.data || err.message);
-    res.status(500).send('❌ Error during OAuth or reposting');
+    res.status(500).send('❌ Failed to retweet or reply');
   }
 });
 
