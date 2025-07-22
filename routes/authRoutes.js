@@ -253,48 +253,63 @@ router.post("/tweet", async (req, res) => {
   }
 });
 
-// const {
-//   TWITTER_CLIENT_ID,
-//   TWITTER_CLIENT_SECRET,
-//   TWITTER_CALLBACK_URL,
-// } = process.env;
-
-// let access_token = ""; 
-
-// router.get("/twitter/callback", async (req, res) => {
-//   const { code } = req.query;
-
-//   try {
-//     const params = new URLSearchParams({
-//       code,
-//       grant_type: "authorization_code",
-//       client_id: TWITTER_CLIENT_ID,
-//       redirect_uri: TWITTER_CALLBACK_URL,
-//       code_verifier: "challenge", 
-//     });
-
-//     const tokenRes = await axios.post(
-//       "https://api.twitter.com/2/oauth2/token",
-//       params,
-//       {
-//         headers: {
-//           "Content-Type": "application/x-www-form-urlencoded",
-//           Authorization:
-//             "Basic " +
-//             Buffer.from(`${TWITTER_CLIENT_ID}:${TWITTER_CLIENT_SECRET}`).toString("base64"),
-//         },
-//       }
-//     );
-
-//     access_token = tokenRes.data.access_token;
-//     console.log("✅ Access token received:", access_token);
-
-//     res.redirect(`http://localhost:3000/dashboard?accessToken=${access_token}`);
-//   } catch (err) {
-//     console.error("❌ Token exchange failed:", err.response?.data || err.message);
-//     res.status(500).send("Twitter login failed");
-//   }
-// });
-
+// Convert Twitter access token to JWT token
+router.post("/twitter-to-jwt", async (req, res) => {
+  const { accessToken } = req.body;
+  
+  if (!accessToken) {
+    return res.status(400).json({ success: false, message: "Twitter access token is required" });
+  }
+  
+  try {
+    // Get user info from Twitter API
+    const userResponse = await axios.get("https://api.twitter.com/2/users/me", {
+      headers: {
+        Authorization: `Bearer ${accessToken}`
+      }
+    });
+    
+    const twitterUser = userResponse.data.data;
+    
+    if (!twitterUser || !twitterUser.id) {
+      return res.status(400).json({ success: false, message: "Invalid Twitter token" });
+    }
+    
+    // Check if user exists in our database
+    let userResult = await pool.query('SELECT * FROM users WHERE twitter_id = $1', [twitterUser.id]);
+    
+    let user;
+    if (userResult.rows.length === 0) {
+      // Create new user if not exists
+      const insertResult = await pool.query(
+        'INSERT INTO users (name, email, twitter_id) VALUES ($1, $2, $3) RETURNING *',
+        [twitterUser.name, `${twitterUser.id}@twitter.com`, twitterUser.id]
+      );
+      user = insertResult.rows[0];
+    } else {
+      user = userResult.rows[0];
+    }
+    
+    // Generate JWT token
+    const token = jwt.sign(
+      { id: user.id, twitter_id: twitterUser.id },
+      process.env.JWT_SECRET || 'buzzly-secret-key',
+      { expiresIn: '24h' }
+    );
+    
+    res.json({
+      success: true,
+      token,
+      user: {
+        id: user.id,
+        name: user.name,
+        twitter_id: twitterUser.id
+      }
+    });
+  } catch (error) {
+    console.error("Error converting Twitter token to JWT:", error);
+    res.status(500).json({ success: false, message: "Failed to authenticate with Twitter" });
+  }
+});
 
 module.exports = router;

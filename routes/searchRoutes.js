@@ -71,7 +71,7 @@ router.get("/search", async (req, res) => {
   const minLikes = parseInt(req.query.minLikes || "0");
   const minRetweets = parseInt(req.query.minRetweets || "0");
   const minFollowers = parseInt(req.query.minFollowers || "0");
-
+const maxResults = parseInt(req.query.max_results || "10");
   if (!rawKeyword)
     return res.status(400).json({ error: "Keyword is required" });
 
@@ -177,7 +177,8 @@ router.get("/search", async (req, res) => {
         );
       }
 
-      allTweets.push(...filtered);
+      // allTweets.push(...filtered);
+      allTweets.push(...filtered.slice(0, maxResults));
     }
 
     res.json({
@@ -199,8 +200,13 @@ router.get("/search/history", async (req, res) => {
       FROM tweets
       ORDER BY created_at DESC
     `);
+ const formattedData = result.rows.map(post => ({
+      ...post,
+      tweet_url: `https://twitter.com/i/web/status/${post.id}`
+    }));
 
-    res.json(result.rows);
+    res.json(formattedData);
+    // res.json(result.rows);
   } catch (err) {
     console.error("❌ Failed to fetch tweet history:", err.message);
     res.status(500).json({ error: "Failed to fetch tweet history" });
@@ -242,6 +248,7 @@ router.post("/postReply", async (req, res) => {
     );
  res.json({ message: "Reply posted successfully", data: twitterResponse.data });
     // res.status(200).json({ message: "Reply posted!", data: response.data });
+    
   } catch (err) {
     console.error("Tweet post error", err?.response?.data || err);
     res.status(500).json({ error: "Failed to post tweet" });
